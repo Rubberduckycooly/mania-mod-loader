@@ -35,6 +35,7 @@ struct PointerList
 };
 
 typedef void(__cdecl *ModInitFunc)(const char *path);
+typedef void(__cdecl *ModLinkFunc)(void *info, void (*initAPI)(void** globals, int size, void**getObject));
 
 typedef void(__cdecl *ModEvent)();
 

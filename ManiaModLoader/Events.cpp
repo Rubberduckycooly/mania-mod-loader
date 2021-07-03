@@ -1,7 +1,7 @@
 #include "stdafx.h"
 #include "Events.h"
 
-std::vector<ModEvent> modLinkEvents;
+std::vector<ModLinkFunc> modLinkEvents;
 std::vector<ModEvent> modScreenUpdateEvents;
 std::vector<ModEvent> modScreenDrawUpdateEvents;
 std::vector<ModEvent> modFrameEvents;
@@ -18,4 +18,12 @@ void RegisterEvent(std::vector<ModEvent>& eventList, HMODULE module, const char*
 
 	if (modEvent != nullptr)
 		eventList.push_back(modEvent);
+}
+
+void RegisterLinkEvent(HMODULE module, const char* name)
+{
+	const ModLinkFunc modEvent = (const ModLinkFunc)GetProcAddress(module, name);
+
+	if (modEvent != nullptr)
+		modLinkEvents.push_back(modEvent);
 }

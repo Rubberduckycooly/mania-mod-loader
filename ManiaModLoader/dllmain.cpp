@@ -30,6 +30,8 @@ using std::unordered_map;
 
 static bool SteamProtected = false;
 
+typedef unsigned int bool32;
+
 /**
 * Change write protection of the .trace section.
 * @param protect True to protect; false to unprotect.
@@ -632,65 +634,132 @@ static const HelperFunctions helperFunctions =
 	&_CheckFile
 };
 
-struct SKUInfo {
-	DWORD PlatformID;
-	DWORD Language;
-	DWORD Region;
-};
 
-struct ScreenInfo {
-	WORD FrameBuffer[0x4B000];
-	DWORD XPos;
-	DWORD YPos;
-	DWORD Width;
-	DWORD Height;
-	DWORD ScreenCenterX;
-	DWORD ScreenCenterY;
-	DWORD Pitch;
-	DWORD UnknownA;
-	DWORD UnknownB;
-	DWORD ScreenWidth2;
-	DWORD Height2;
-	DWORD Height3;
+typedef struct {
+	unsigned short objectID;
+	byte active;
+} Object; //RSDK's object struct
+
+typedef struct {
+	const char* name;
+	Object** structPtr;
+} GameObject; //wrapper object struct
+
+// Function Table
+typedef struct {
+	void (*InitGlobalVariables)(void** globals, int size);
+	void (*RegisterObject)(Object** structPtr, const char* name, unsigned int entitySize, unsigned int objectSize, void (*update)(void), void (*lateUpdate)(void),
+		void (*staticUpdate)(void), void (*draw)(void), void (*create)(void*), void (*stageLoad)(void), void (*editorDraw)(void),
+		void (*editorLoad)(void), void (*serialize)(void));
+	void (*RegisterObjectContainer)(void** structPtr, const char* name, unsigned int objectSize);
+	//more funcs exist but we only need these 3
+} RSDKFunctionTable;
+
+struct SKUInfo {
+	int platform;
+	int language;
+	int region;
 };
 
 struct GameInfo {
-	void* FunctionPtrs; //Array of function ptrs
-	void* UserdataPtrs; //Array of userdata func ptrs
-	char* GameName;
-	SKUInfo* CurrentSKU;
-	void* ActiveEntityInfo;
-	void* ActiveDPad;
-	void* ActiveAnalogStick;
-	void* gap1C;
-	void* dword20;
-	void* dword24;
-	void* dword28;
-	void* dword2C;
-	ScreenInfo* ScreenInfo;
+	RSDKFunctionTable* functionPtrs;
+	void* userdataPtrs;
+	void* info;
+	SKUInfo* currentSKU;
+	void* sceneInfo;
+	void* controller;
+	void* stickL;
+	void* stickR;
+	void* triggerL;
+	void* triggerR;
+	void* touchMouse;
+	void* unknown;
+	void* screenInfo;
 };
 
+GameInfo* gameinfo = NULL;
 SKUInfo skuInfo;
-char* GameName = "";
 bool changedPlatform = true;
 bool changedRegion = true;
+void* globalVars = NULL;
+
+GameObject objectList[0x400];
+int objectListCount = 0;
+
+void (*RegisterObject_Ptr)(Object** structPtr, const char* name, unsigned int entitySize, unsigned int  objectSize, void (*update)(void), void (*lateUpdate)(void),
+	void (*staticUpdate)(void), void (*draw)(void), void (*create)(void*), void (*stageLoad)(void), void (*editorDraw)(void),
+	void (*editorLoad)(), void (*serialize)(void));
+void RegisterObject_Private(Object** structPtr, const char* name, unsigned int  entitySize, unsigned int  objectSize, void (*update)(void),
+	void (*lateUpdate)(void),
+	void (*staticUpdate)(void), void (*draw)(void), void (*create)(void*), void (*stageLoad)(void), void (*editorDraw)(void),
+	void (*editorLoad)(void), void (*serialize)(void))
+{
+	objectList[objectListCount].name = name;
+	objectList[objectListCount].structPtr = structPtr;
+	if (RegisterObject_Ptr)
+		RegisterObject_Ptr(structPtr, name, entitySize, objectSize, update, lateUpdate, staticUpdate, draw, create, stageLoad, editorDraw, editorLoad,
+			serialize);
+	objectListCount++;
+}
+
+void* GetObjectPtr(const char* name)
+{
+	for (int i = 0; i < objectListCount; ++i) {
+		if (objectList[i].structPtr && *objectList[i].structPtr) {
+			if (strcmp(name, objectList[i].name) == 0)
+				return *objectList[i].structPtr;
+		}
+	}
+	return NULL;
+}
+
+void initAPI(void** globals, int size, void** getObject) {
+
+	if (!globalVars) {
+		memset(objectList, 0, 0x400 * sizeof(GameObject));
+		objectListCount = 0;
+
+		void (*initGlobalVariables)(void** globals, int size) = NULL;
+
+		if (gameinfo)
+			initGlobalVariables = gameinfo->functionPtrs->InitGlobalVariables;
+
+		if (initGlobalVariables)
+			initGlobalVariables(globals, size);
+
+		globalVars = *globals;
+
+		RegisterObject_Ptr = gameinfo->functionPtrs->RegisterObject;
+		gameinfo->functionPtrs->RegisterObject = RegisterObject_Private;
+	}
+	else {
+		globals = &globalVars;
+	}
+	//getObject = (void**)&GetObjectPtr;
+	*getObject = GetObjectPtr;
+}
+
 DataPointer(HMODULE, GameDLLModule, 0x6ECA10);
 ThiscallFunctionPointer(int, SetupObjects, (GameInfo* GameInfo), 0x1A6E20);
-static int LinkGameLogic(GameInfo* GameInfo) {
+static int LinkGameLogic(GameInfo* gameInfo) {
 	//No reason to modify it if we haven't changed anything
 	if (changedPlatform || changedRegion) {
-		skuInfo.Language = GameInfo->CurrentSKU->Language;
+		skuInfo.language = gameInfo->currentSKU->language;
 
 		if (!changedPlatform)
-			skuInfo.PlatformID = GameInfo->CurrentSKU->PlatformID;
+			skuInfo.platform = gameInfo->currentSKU->platform;
 		if (!changedRegion)
-			skuInfo.Region = GameInfo->CurrentSKU->Region;
+			skuInfo.region = gameInfo->currentSKU->region;
 
-		GameInfo->CurrentSKU = &skuInfo;
+		gameInfo->currentSKU = &skuInfo;
 	}
-	//GameName = GameInfo->GameName;
-	int result = SetupObjects(GameInfo);
-	RaiseEvents(modLinkEvents);
+
+	MessageBoxA(NULL, "hello", "hi", MB_OK);
+
+	gameinfo = gameInfo;
+	for (unsigned int i = 0; i < modLinkEvents.size(); ++i)
+		modLinkEvents[i](gameInfo, initAPI);
+	int result = SetupObjects(gameInfo);
 	GameDLLModule = NULL; // Game will try freeing it otherwise
 	return result;
 };
@@ -706,10 +775,10 @@ HMODULE GetCurrentModule()
 	return hModule;
 }
 
-FunctionPointer(int, sub_1CE730, (), 0x1CE730);
+FunctionPointer(int, InitialiseUserStorage, (), 0x1CE730);
 int InitMods()
 {
-	int result = sub_1CE730();
+	int result = InitialiseUserStorage();
 	HookDirect3D();
 	if (ConsoleEnabled)
 	{
@@ -908,7 +977,7 @@ int InitMods()
 							if (pointers)
 								for (int j = 0; j < pointers->Count; j++)
 									WriteData((void **)pointers->Pointers[j].address, pointers->Pointers[j].data);
-							RegisterEvent(modLinkEvents, module, "LinkGameLogic");
+							RegisterLinkEvent(module, "LinkGameLogicDLL");
 							RegisterEvent(modScreenUpdateEvents, module, "OnScreenUpdate");
 							RegisterEvent(modScreenDrawUpdateEvents, module, "OnScreenDrawUpdate");
 							RegisterEvent(modFrameEvents, module, "OnFrame");
@@ -1081,20 +1150,20 @@ int InitMods()
 		codes_str.close();
 	}
 
-	skuInfo.PlatformID = settings->getInt("Platform"); //PC
-	if (skuInfo.PlatformID == 5)
-		skuInfo.PlatformID = 0xFF; //dev
-	skuInfo.Region = settings->getInt("Region"); //US
+	skuInfo.platform = settings->getInt("Platform"); //PC
+	if (skuInfo.platform == 5)
+		skuInfo.platform = 0xFF; //dev
+	skuInfo.region = settings->getInt("Region"); //US
 
-	if (skuInfo.PlatformID == 0)
+	if (skuInfo.platform == 0)
 		changedPlatform = false;
-	else if (skuInfo.PlatformID != 0xFF)
-		skuInfo.PlatformID--;
+	else if (skuInfo.platform != 0xFF)
+		skuInfo.platform--;
 
-	if (skuInfo.Region == 0)
+	if (skuInfo.region == 0)
 		changedRegion = false;
 	else
-		skuInfo.Region--;
+		skuInfo.region--;
 
 	//Enable Game.dll logic
 	WriteData<1>((void*)(baseAddress + 0x002FC864), 0x01);

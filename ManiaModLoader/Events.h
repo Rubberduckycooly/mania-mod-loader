@@ -3,7 +3,7 @@
 #include "ManiaModLoader.h"
 #include <vector>
 
-extern std::vector<ModEvent> modLinkEvents;
+extern std::vector<ModLinkFunc> modLinkEvents;
 extern std::vector<ModEvent> modScreenUpdateEvents;
 extern std::vector<ModEvent> modScreenDrawUpdateEvents;
 extern std::vector<ModEvent> modFrameEvents;
@@ -26,3 +26,11 @@ inline void RaiseEvents(const std::vector<ModEvent>& eventList)
 * @param name The name of the exported function from the module (i.e OnFrame)
 */
 void RegisterEvent(std::vector<ModEvent>& eventList, HMODULE module, const char* name);
+
+/**
+* Registers an event to the link list.
+* @param eventList The event list to add to.
+* @param module The module for the mod DLL.
+* @param name The name of the exported function from the module (i.e OnFrame)
+*/
+void RegisterLinkEvent(HMODULE module, const char* name);
